@@ -1,0 +1,151 @@
+{
+  "network": "GenLayer studionet, chain 61999, https://studio.genlayer.com/api",
+  "price_court": "0x1A30EcE83aE60CbE84c00a97c0DE069B24B85a13",
+  "read_at_utc": "2026-11-09T17:28:36Z",
+  "config": {
+    "deal_count": 2,
+    "escrowed": "0",
+    "feeds": {
+      "BTC/USD": {
+        "feed_id": "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+        "solana_account": "4cSM2e6rvbGQUFiJbqytoVMi5GgghSMr8LwVrT9VPSPo"
+      },
+      "ETH/USD": {
+        "feed_id": "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+        "solana_account": "42amVS4KgzR9rA28tkVYqVXjq9Qa8dcZQMbH5EYFX6XC"
+      },
+      "SOL/USD": {
+        "feed_id": "0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d",
+        "solana_account": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+      }
+    },
+    "price_tolerance_bps": 25,
+    "price_window_seconds": 600,
+    "pyth_receiver_program": "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ",
+    "solana_rpcs": [
+      "https://api.mainnet-beta.solana.com",
+      "https://solana-rpc.publicnode.com"
+    ]
+  },
+  "deals": [
+    {
+      "accepted_at": "2026-11-09T16:49:14.338989Z",
+      "closed_at": "2026-11-09T16:57:42.210149Z",
+      "condition_met": true,
+      "counterparty": "0x47a9fa452B4AEe743AabE5F4F292d692Ba19a584",
+      "created_at": "2026-11-09T16:48:49.704276Z",
+      "evidence": {
+        "conf": "4775688990",
+        "expo": -8,
+        "price": "74962.3431101",
+        "price_raw": "7496234311010",
+        "publish_time": 1794243441,
+        "source": "pyth-solana-receiver:4cSM2e6rvbGQUFiJbqytoVMi5GgghSMr8LwVrT9VPSPo"
+      },
+      "id": "1",
+      "last_error": "",
+      "pot": "10000000000000000000",
+      "proposer": "0xCacEEB6d30dA6aB2DeAd2eB970D876afeA4CB902",
+      "settle_attempts": 2,
+      "settlement_window_closes": "2026-11-09T17:07:00Z",
+      "stake": "5000000000000000000",
+      "status": "settled",
+      "summary": "If the Pyth BTC/USD price at 2026-11-09T16:57:00Z is > 74000, the counterparty wins the pot; otherwise the proposer wins the pot.",
+      "terms": {
+        "comparator": ">",
+        "feed": "BTC/USD",
+        "feed_id": "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+        "settle_at": 1794243420,
+        "settle_at_iso": "2026-11-09T16:57:00Z",
+        "threshold": "74000",
+        "winner_if_true": "counterparty"
+      },
+      "terms_text": "Agent A pays Agent B the pot if BTC/USD is above 74,000 at 2026-11-09T16:57:00Z, otherwise B pays A.",
+      "winner": "0x47a9fa452B4AEe743AabE5F4F292d692Ba19a584"
+    },
+    {
+      "accepted_at": "2026-11-09T17:13:54.223121Z",
+      "closed_at": "2026-11-09T17:26:17.483178Z",
+      "condition_met": false,
+      "counterparty": "0xE5E9A71EC0EC57C6538cfa11ba611ef65774f83C",
+      "created_at": "2026-11-09T17:12:22.348051Z",
+      "evidence": {
+        "conf": "194623697",
+        "expo": -8,
+        "price": "2124.61939107",
+        "price_raw": "212461939107",
+        "publish_time": 1794245165,
+        "source": "pyth-solana-receiver:42amVS4KgzR9rA28tkVYqVXjq9Qa8dcZQMbH5EYFX6XC"
+      },
+      "id": "2",
+      "last_error": "",
+      "pot": "10000000000000000000",
+      "proposer": "0x087487f828e8D7F9659e2F2D9eB627120C977325",
+      "settle_attempts": 2,
+      "settlement_window_closes": "2026-11-09T17:33:00Z",
+      "stake": "5000000000000000000",
+      "status": "settled",
+      "summary": "If the Pyth ETH/USD price at 2026-11-09T17:23:00Z is < 2000, the counterparty wins the pot; otherwise the proposer wins the pot.",
+      "terms": {
+        "comparator": "<",
+        "feed": "ETH/USD",
+        "feed_id": "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+        "settle_at": 1794244980,
+        "settle_at_iso": "2026-11-09T17:23:00Z",
+        "threshold": "2000",
+        "winner_if_true": "counterparty"
+      },
+      "terms_text": "Agent A pays Agent B the pot if ETH/USD is below 2,000 at 2026-11-09T17:23:00Z, otherwise B pays A.",
+      "winner": "0x087487f828e8D7F9659e2F2D9eB627120C977325"
+    }
+  ],
+  "reputation": {
+    "0xCacEEB6d30dA6aB2DeAd2eB970D876afeA4CB902": {
+      "address": "0xCacEEB6d30dA6aB2DeAd2eB970D876afeA4CB902",
+      "amount_lost": "5000000000000000000",
+      "amount_won": "0",
+      "lost": 1,
+      "refunded": 0,
+      "settled": 1,
+      "win_rate_bps": 0,
+      "won": 0
+    },
+    "0x47a9fa452B4AEe743AabE5F4F292d692Ba19a584": {
+      "address": "0x47a9fa452B4AEe743AabE5F4F292d692Ba19a584",
+      "amount_lost": "0",
+      "amount_won": "5000000000000000000",
+      "lost": 0,
+      "refunded": 0,
+      "settled": 1,
+      "win_rate_bps": 10000,
+      "won": 1
+    },
+    "0x087487f828e8D7F9659e2F2D9eB627120C977325": {
+      "address": "0x087487f828e8D7F9659e2F2D9eB627120C977325",
+      "amount_lost": "0",
+      "amount_won": "5000000000000000000",
+      "lost": 0,
+      "refunded": 0,
+      "settled": 1,
+      "win_rate_bps": 10000,
+      "won": 1
+    },
+    "0xE5E9A71EC0EC57C6538cfa11ba611ef65774f83C": {
+      "address": "0xE5E9A71EC0EC57C6538cfa11ba611ef65774f83C",
+      "amount_lost": "5000000000000000000",
+      "amount_won": "0",
+      "lost": 1,
+      "refunded": 0,
+      "settled": 1,
+      "win_rate_bps": 0,
+      "won": 0
+    }
+  },
+  "balances": {
+    "price_court": "0",
+    "run1_agent_a_eoa": "95000000000000000000",
+    "run1_agent_b_eoa": "95000000000000000000",
+    "run2_wallet_a": "15000000000000000000",
+    "run2_wallet_b": "5000000000000000000"
+  }
+}

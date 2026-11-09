@@ -1,0 +1,6 @@
+.pricecourt/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+artifacts/

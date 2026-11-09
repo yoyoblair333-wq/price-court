@@ -1,0 +1,59 @@
+name: CI
+
+# PriceCourt CI: lint (3 checks) + typecheck + the direct-mode pytest suite, exactly the
+# local gate documented in the README. Mirrors the contract job of the GenLayer
+# reference projects: pinned GenVM runner, mocked LLM and web.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: contract (lint + typecheck + direct-mode tests)
+    runs-on: ubuntu-latest
+    env:
+      PYTHONUTF8: "1"
+      GENVM_VERSION: v0.2.16   # the GenVM runner the contract's Depends header targets
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install toolchain
+        # genlayer-test -> GenVM SDK + direct-mode pytest fixtures
+        # genvm-linter  -> the genvm-lint CLI; pyright drives its typecheck
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Lint (genvm-lint check)
+        run: |
+          genvm-lint check contracts/price_court.py
+          genvm-lint check contracts/agent_wallet.py
+
+      - name: Typecheck (genvm-lint typecheck)
+        run: |
+          genvm-lint typecheck contracts/price_court.py
+          genvm-lint typecheck contracts/agent_wallet.py
+
+      - name: Direct-mode test suite
+        run: pytest tests/direct -q
+
+      - name: Scripts parse
+        run: |
+          python scripts/pricecourt.py --help
+          python scripts/live_demo.py --help
