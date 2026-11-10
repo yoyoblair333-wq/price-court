@@ -44,16 +44,22 @@ jobs:
         run: |
           genvm-lint check contracts/price_court.py
           genvm-lint check contracts/agent_wallet.py
+          genvm-lint check primitives/pyth_reader/pyth_reader.py
 
       - name: Typecheck (genvm-lint typecheck)
         run: |
           genvm-lint typecheck contracts/price_court.py
           genvm-lint typecheck contracts/agent_wallet.py
+          genvm-lint typecheck primitives/pyth_reader/pyth_reader.py
 
       - name: Direct-mode test suite
         run: pytest tests/direct -q
+
+      - name: PythReader primitive tests (direct mode)
+        run: pytest primitives/pyth_reader/tests -q
 
       - name: Scripts parse
         run: |
           python scripts/pricecourt.py --help
           python scripts/live_demo.py --help
+          python primitives/pyth_reader/deploy_studio.py --help

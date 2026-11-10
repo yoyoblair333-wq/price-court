@@ -118,7 +118,12 @@ skills/price-court/SKILL.md   the agent skill: propose / accept / settle / reput
 scripts/pricecourt.py         CLI: account, deploy, propose, accept, settle, cancel, decline, refund, deal(s), reputation
 scripts/live_demo.py          one full live deal through agent wallets, recording every tx
 docs/LIVE_RUN.md              the live studionet run: contract address and every tx hash
+primitives/pyth_reader/       standalone reusable primitive: keyless, consensus-verified Pyth price reader
 ```
+
+PriceCourt's Pyth evidence read is also packaged as a standalone contract,
+[`primitives/pyth_reader`](primitives/pyth_reader/README.md): `refresh(feed)` stores the
+latest validator-agreed Pyth price and any contract reads it with `get_price(feed)`.
 
 ## Quickstart (studionet, free, no captcha)
 

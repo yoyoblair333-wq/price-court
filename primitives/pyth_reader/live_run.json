@@ -1,0 +1,98 @@
+{
+  "network": "studionet (chain 61999, https://studio.genlayer.com/api)",
+  "caller": "0xAc7F9f121B77a947BF6DE5c4cb35DF719D7FDE95",
+  "steps": [
+    {
+      "tx": "0x6533c1a40825b42b6a6fca791e82a233c86e9b9434dfbf91950ed967531497cc",
+      "status": "FINALIZED",
+      "result": "MAJORITY_AGREE",
+      "votes": [
+        "agree",
+        "agree",
+        "agree",
+        "idle",
+        "idle"
+      ],
+      "step": "deploy PythReader",
+      "contract": "0xBbbDE88057B1516Cad0a7c3EC5F28575D9391F1a"
+    },
+    {
+      "tx": "0xe968d3adfa98d9d5e4f6f28ee48c791aca87cc56d4ddc16730e61ede38853ac4",
+      "status": "FINALIZED",
+      "result": "MAJORITY_AGREE",
+      "votes": [
+        "agree",
+        "agree",
+        "agree",
+        "idle",
+        "idle"
+      ],
+      "step": "refresh BTC/USD",
+      "record": {
+        "attempts": 1,
+        "available": true,
+        "conf": "93.7620178",
+        "conf_raw": "9376201780",
+        "expo": -8,
+        "feed": "BTC/USD",
+        "feed_id": "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+        "last_error": "",
+        "price": "74705.599649",
+        "price_raw": "7470559964900",
+        "publish_time": 1794285157,
+        "refreshes": 1,
+        "source": "pyth-solana-receiver:4cSM2e6rvbGQUFiJbqytoVMi5GgghSMr8LwVrT9VPSPo",
+        "updated_at": "2026-11-10T04:33:09.728834Z"
+      }
+    },
+    {
+      "tx": "0x1f97dd7d727e2d788ee58a995048757ae2a216eacac8ba6c5a62c0be35e42ee0",
+      "status": "FINALIZED",
+      "result": "MAJORITY_AGREE",
+      "votes": [
+        "agree",
+        "agree",
+        "agree",
+        "idle",
+        "idle"
+      ],
+      "step": "refresh ETH/USD",
+      "record": {
+        "attempts": 1,
+        "available": true,
+        "conf": "2.60555507",
+        "conf_raw": "260555507",
+        "expo": -8,
+        "feed": "ETH/USD",
+        "feed_id": "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+        "last_error": "",
+        "price": "2120.00944493",
+        "price_raw": "212000944493",
+        "publish_time": 1794285195,
+        "refreshes": 1,
+        "source": "pyth-solana-receiver:42amVS4KgzR9rA28tkVYqVXjq9Qa8dcZQMbH5EYFX6XC",
+        "updated_at": "2026-11-10T04:33:52.183523Z"
+      }
+    }
+  ],
+  "contract": "0xBbbDE88057B1516Cad0a7c3EC5F28575D9391F1a",
+  "explorer": "https://explorer-studio.genlayer.com/address/0xBbbDE88057B1516Cad0a7c3EC5F28575D9391F1a",
+  "get_price": {
+    "BTC/USD": {
+      "conf_raw": "9376201780",
+      "expo": -8,
+      "feed": "BTC/USD",
+      "price": "74705.599649",
+      "price_raw": "7470559964900",
+      "publish_time": 1794285157
+    },
+    "ETH/USD": {
+      "conf_raw": "260555507",
+      "expo": -8,
+      "feed": "ETH/USD",
+      "price": "2120.00944493",
+      "price_raw": "212000944493",
+      "publish_time": 1794285195
+    }
+  }
+}
