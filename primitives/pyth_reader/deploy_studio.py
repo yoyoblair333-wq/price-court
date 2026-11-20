@@ -83,7 +83,7 @@ def main():
         step.update(step=f"refresh {feed}", record=rec)
         log["steps"].append(step)
         print(f"refresh {feed}: tx {step['tx']} {step['status']} {step['result']} votes={step['votes']}", flush=True)
-        print(f"  latest: price={rec['price']} conf={rec['conf']} publish_time={rec['publish_time']} "
+        print(f"  latest: price={rec['price']} publish_time={rec['publish_time']} "
               f"error={rec['last_error']!r}", flush=True)
         if rec["available"]:
             log.setdefault("get_price", {})[feed] = client.read_contract(address=addr, function_name="get_price",
