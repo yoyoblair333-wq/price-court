@@ -163,15 +163,38 @@ publish-minute mismatch, threshold-decision identity, forged leader price, leade
 owner, wrong feed id, partial verification, wrong discriminator, non-positive price,
 stale and non-monotonic prices, RPC fallback, admin and ownership.
 
-## Live deployment (GenLayer studionet, chain 61999)
+## Live deployment (GenLayer studionet, chain 61999), v2, 2026-11-20
+
+Two deployments of the same v2 source, both with **exact consensus on the canonical
+observation** (3 of 3 voting validators agreed on every round below).
+
+**Demo instance** (`max_staleness_seconds = 604800`): stores the agreed canonical price.
 
 | | |
 |---|---|
-| Contract | `0xBbbDE88057B1516Cad0a7c3EC5F28575D9391F1a` |
-| Explorer | https://explorer-studio.genlayer.com/address/0xBbbDE88057B1516Cad0a7c3EC5F28575D9391F1a |
-| Deploy tx | `0x6533c1a40825b42b6a6fca791e82a233c86e9b9434dfbf91950ed967531497cc` (FINALIZED, MAJORITY_AGREE) |
-| `refresh("BTC/USD")` | `0xe968d3adfa98d9d5e4f6f28ee48c791aca87cc56d4ddc16730e61ede38853ac4` (FINALIZED, MAJORITY_AGREE, 3 agree): stored 74705.599649 ± 93.76, publish_time 1794285157 |
-| `refresh("ETH/USD")` | `0x1f97dd7d727e2d788ee58a995048757ae2a216eacac8ba6c5a62c0be35e42ee0` (FINALIZED, MAJORITY_AGREE, 3 agree): stored 2120.00944493 ± 2.61, publish_time 1794285195 |
+| Contract | `0x26d259e1eB6c857c80065B0537Ffa3574d3f3eCe` |
+| Explorer | https://explorer-studio.genlayer.com/address/0x26d259e1eB6c857c80065B0537Ffa3574d3f3eCe |
+| Deploy tx | `0x0185fcc111fadf26f82166385a129649012330be94cfa4467447bcc1450375cc` (FINALIZED) |
+| `refresh("BTC/USD")` | `0xc9d5e72b7861eab69a24ac053341887f9aca1ba2d88dbde6ab6de51d60a9f7f7` (FINALIZED, MAJORITY_AGREE): stored **61788** (5 significant digits), publish bucket 1795161600 |
+| `refresh("ETH/USD")` | `0x3945c742d106890ab869a8caf53c173939091895b626f394270fe1e982298b9d` (FINALIZED, MAJORITY_AGREE): stored **1821.3**, publish bucket 1794920400 |
 
-Full record: [`live_run.json`](live_run.json). Studio is a shared sandbox that is reset
-from time to time; redeploy with `deploy_studio.py` if the address is gone.
+**Strict instance** (`max_staleness_seconds = 300`, the default): validators again agreed
+exactly on the canonical reading, and the contract then **refused to store it** because
+the Pyth Solana account was older than 5 minutes (`last_error` = "Pyth price is older than
+max_staleness_seconds"). This is the intended fail-closed behaviour.
+
+| | |
+|---|---|
+| Contract | `0x464441fB14e0885a6f16F46D1d8B404E46fc55E0` |
+| Deploy tx | `0x83ef611348d3957c99c735b3b76634dc164438bcf8ecb6dae10efdcee2b855b2` (FINALIZED, MAJORITY_AGREE) |
+| `refresh("BTC/USD")` | `0xeb40be66e044ad0f232707e2903e06668d7f57aa403bcf0ec0a4af861b93718a` (FINALIZED, MAJORITY_AGREE), not stored: stale |
+| `refresh("ETH/USD")` | `0x7c6068f367e736a0cad0e418d869f1ee7474b2220cc0c8079ec63dcf2956dd30` (FINALIZED, MAJORITY_AGREE), not stored: stale |
+
+> **Operational note (observed 2026-11-20).** The sponsored Pyth `PriceUpdateV2` accounts on
+> Solana were updating slowly that day: BTC/USD was about 6 hours old and ETH/USD about
+> 3 days old at read time. PythReader reports this honestly instead of storing a stale
+> value. Pick `max_staleness_seconds` to match the freshness your consumer needs; a
+> consumer that needs minute-fresh prices should treat a stale `last_error` as "no price".
+
+Full record of both: [`live_run.json`](live_run.json). Studio is a shared sandbox that is
+reset from time to time; redeploy with `deploy_studio.py` if an address is gone.
