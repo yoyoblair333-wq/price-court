@@ -32,13 +32,31 @@ On `refresh(feed)` the leader and every validator each fetch the account and che
 | embedded 32-byte feed id == the whitelisted id | an account holding a different feed |
 | `price > 0` | broken updates |
 
-Consensus rule (`validator_fn`): the validator accepts the leader's reading only if its
-own reading is within **25 bps** and the publish times are at most **120 s** apart. A
+Consensus rule (`validator_fn`), **v2**: consensus is on a *canonical observation*, not on a
+raw reading. Every node (leader and validators) reduces its own verified reading to the
+same deterministic form:
+
+* price truncated to `price_sig_digits` significant digits (default **5**, exact integer
+  arithmetic, trailing zeros folded into the exponent: BTC `74962.34311` -> `74962`),
+* `publish_time` floored to a `time_bucket_seconds` bucket (default **60 s**).
+
+A validator accepts the leader's output only if it is **exactly equal** to its own
+canonical observation. The value that gets stored is therefore one that every agreeing
+validator computed independently, so *every accepted output produces the same downstream
+decision*: a consumer asking "is BTC above X?" gets the same answer whichever validator
+led the round. A reading that straddles a bucket edge simply fails to agree and the round
+is retried with fresh reads (liveness is traded for an identical material result). A
 leader that reports "unavailable" is accepted only if the validator cannot read a usable
-price either. A forged leader price fails the tolerance check.
+price either; the reason text is diagnostic and is not compared.
+
+> **Why v2.** v1 accepted any leader price within 25 bps of the validator's own reading and
+> then stored the leader's exact value. Two acceptable leader values (e.g. `96123.99` and
+> `96124.00`) could therefore sit on opposite sides of a downstream threshold. v2 removes
+> the tolerance window entirely: there is exactly one acceptable output per round.
+> `test_threshold_decision_is_identical_for_every_accepted_output` covers the case.
 
 Storage rules: a reading is stored only if its `publish_time` is newer than the stored
-one and no older than `max_staleness_seconds` (constructor argument, default 300) at the
+bucket and no older than `max_staleness_seconds` (constructor argument, default 300) at the
 transaction's consensus time. Otherwise nothing changes and the reason is stored in
 `last_error`. `refresh` never reverts on an upstream problem, so the failure is visible.
 
@@ -50,7 +68,7 @@ transaction's consensus time. Otherwise nothing changes and the reason is stored
 | `latest(feed)` | view | full record: price, conf, expo, publish time, bookkeeping, `last_error` |
 | `get_price(feed)` | view | compact record; **reverts** if no verified price is stored yet |
 | `list_feeds()` | view | `latest` for every whitelisted feed |
-| `get_config()` | view | feeds (ids + Solana accounts), RPCs, tolerance, staleness, owner |
+| `get_config()` | view | feeds (ids + Solana accounts), RPCs, canonical precision, staleness, owner |
 | `add_feed(feed, feed_id, account)` | write, owner | whitelist another Pyth feed (same on-chain checks apply) |
 | `transfer_ownership(addr)` / `accept_ownership()` | write | two-step ownership |
 
@@ -136,12 +154,12 @@ Pass `--contract 0x...` to refresh an existing deployment.
 ```bash
 genvm-lint check primitives/pyth_reader/pyth_reader.py
 genvm-lint typecheck primitives/pyth_reader/pyth_reader.py
-pytest primitives/pyth_reader/tests -q        # 41 direct-mode tests
+pytest primitives/pyth_reader/tests -q        # 52 direct-mode tests
 ```
 
 The tests mock the Solana RPC reply with byte-exact `PriceUpdateV2` accounts and replay
-the captured validator against different readings: tolerance, exponent mismatch,
-publish-time skew, forged leader price, leader error, unavailable-vs-available, wrong
+the captured validator against different readings: same bucket, bucket edge, exponent mismatch,
+publish-minute mismatch, threshold-decision identity, forged leader price, leader error, unavailable-vs-available, wrong
 owner, wrong feed id, partial verification, wrong discriminator, non-positive price,
 stale and non-monotonic prices, RPC fallback, admin and ownership.
 

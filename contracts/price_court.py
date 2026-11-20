@@ -22,8 +22,12 @@ Where GenLayer is load-bearing
    counterparty accepts the exact structured terms shown by `get_deal` - never an
    interpretation produced later, after the price is known.
 2. EVIDENCE (at `settle`). Every validator independently reads the Pyth price for the
-   whitelisted feed and must agree with the leader within a small relative tolerance
-   AND on the resulting verdict. Feed ids come from the hard-coded whitelist below;
+   whitelisted feed and reduces it to one canonical OUTCOME: whether the reading is
+   usable for this deal (inside the window or not), the verdict, the price truncated to
+   PRICE_SIG_DIGITS significant digits and the publish time floored to the minute. The
+   leader's outcome is accepted only if it is EXACTLY equal to the validator's own, so
+   the stored evidence, the window decision and the payout are identical whichever
+   validator led. Feed ids come from the hard-coded whitelist below;
    the LLM never chooses an id, an account, or a URL.
 3. VERDICT. Evaluation, payout and the reputation update are fully deterministic.
 
@@ -88,8 +92,8 @@ SOLANA_RPCS = (
 COMPARATORS = (">", "<", ">=", "<=")
 SIDES = ("proposer", "counterparty")
 THRESHOLD_DECIMALS = 8                 # thresholds are stored as integer * 10^8
-PRICE_TOLERANCE_BPS = 25               # validator vs leader price: max 0.25% apart
-MAX_PUBLISH_SKEW_SECONDS = 120         # validator vs leader publish_time
+PRICE_SIG_DIGITS = 5                   # canonical evidence precision
+TIME_BUCKET_SECONDS = 60               # canonical publish-time bucket
 MIN_LEAD_SECONDS = 60                  # settlement time must be >= 1 min after proposal
 MAX_HORIZON_SECONDS = 366 * 24 * 3600  # ... and at most ~1 year out
 MAX_TERMS_CHARS = 600
@@ -132,9 +136,9 @@ class Deal:
     accepted_at: str
     closed_at: str
     # settlement evidence and verdict
-    price: str                  # raw Pyth integer price
+    price: str                  # canonical Pyth price (PRICE_SIG_DIGITS significant digits)
     expo: i64
-    conf: str
+    conf: str                   # unused since v2 (kept empty)
     publish_time: u64
     condition_met: bool
     winner: str
@@ -303,12 +307,40 @@ def _condition_met(price: int, expo: int, comparator: str, threshold_e8: int) ->
     return lhs <= rhs
 
 
-def _within_bps(a_price: int, a_expo: int, b_price: int, b_expo: int, bps: int) -> bool:
-    e = min(a_expo, b_expo)
-    a = a_price * 10 ** (a_expo - e)
-    b = b_price * 10 ** (b_expo - e)
-    big = max(abs(a), abs(b))
-    return abs(a - b) * 10000 <= bps * big
+def _canonical_price(price: int, expo: int, sig_digits: int = PRICE_SIG_DIGITS) -> tuple[int, int]:
+    """Truncate a positive integer price to sig_digits significant digits, exactly."""
+    drop = max(0, len(str(price)) - sig_digits)
+    p, e = price // 10 ** drop, expo + drop
+    while p % 10 == 0:
+        p, e = p // 10, e + 1
+    return p, e
+
+
+def settlement_outcome(obs: dict, settle_at: int, window_end: int, comparator: str, threshold_e8: int) -> dict:
+    """Deterministic reduction of ONE node's own Pyth reading to what settle() acts on.
+    Leader and validators each compute this from their own reading; consensus requires
+    the dicts to be identical, so every accepted outcome leads to the same state change."""
+    if not obs.get("ok"):
+        return {"kind": "unavailable", "reason": str(obs.get("reason", "unknown"))}
+    pt = int(obs["publish_time"])
+    if pt < settle_at:
+        return {"kind": "too_early"}
+    if pt > window_end:
+        return {"kind": "too_late"}
+    raw_price, raw_expo = int(obs["price"]), int(obs["expo"])
+    p, e = _canonical_price(raw_price, raw_expo)
+    return {"kind": "verdict",
+            "condition_met": _condition_met(raw_price, raw_expo, comparator, threshold_e8),
+            "price": str(p), "expo": e, "publish_time": pt - pt % TIME_BUCKET_SECONDS}
+
+
+def outcomes_agree(lead, mine: dict) -> bool:
+    """Exact equality; the 'unavailable' reason is diagnostic and is not compared."""
+    if not isinstance(lead, dict) or "kind" not in lead:
+        return False
+    if lead["kind"] == "unavailable" and mine["kind"] == "unavailable":
+        return set(lead) == {"kind", "reason"}
+    return lead == mine
 
 
 def _terms_prompt(terms_text: str) -> str:
@@ -449,32 +481,25 @@ class PriceCourt(gl.Contract):
         return gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
 
     def _observe_price(self, feed_id: str, account: str, d: Deal) -> dict:
-        """Consensus price read. Every validator re-reads Pyth itself and must agree with
-        the leader within PRICE_TOLERANCE_BPS, on publish time within a skew bound, AND
-        on the verdict the price implies. A leader claiming 'unavailable' is accepted
-        only if the validator cannot read a usable price either."""
+        """Consensus settlement read. Every node reads Pyth itself and reduces its reading
+        with settlement_outcome(); the leader's outcome is accepted only if it equals the
+        validator's own exactly (window decision, verdict, canonical price and publish
+        minute). A reading on a bucket edge fails to agree and the round is retried."""
         comparator = d.comparator
         threshold = int(d.threshold_e8)
+        settle_at = int(d.settle_at)
+        window_end = settle_at + int(self.price_window_seconds)
 
         def leader_fn() -> dict:
-            return _read_pyth_account(feed_id, account)
+            return settlement_outcome(_read_pyth_account(feed_id, account), settle_at, window_end,
+                                      comparator, threshold)
 
         def validator_fn(leader_res) -> bool:
             if not isinstance(leader_res, gl.vm.Return):
                 return False
-            lead = leader_res.calldata
-            mine = _read_pyth_account(feed_id, account)
-            if not lead.get("ok"):
-                return not mine.get("ok")
-            if not mine.get("ok"):
-                return False
-            lp, le = int(lead["price"]), int(lead["expo"])
-            mp, me = int(mine["price"]), int(mine["expo"])
-            if abs(int(lead["publish_time"]) - int(mine["publish_time"])) > MAX_PUBLISH_SKEW_SECONDS:
-                return False
-            if not _within_bps(lp, le, mp, me, PRICE_TOLERANCE_BPS):
-                return False
-            return _condition_met(lp, le, comparator, threshold) == _condition_met(mp, me, comparator, threshold)
+            mine = settlement_outcome(_read_pyth_account(feed_id, account), settle_at, window_end,
+                                      comparator, threshold)
+            return outcomes_agree(leader_res.calldata, mine)
 
         return gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
 
@@ -496,8 +521,9 @@ class PriceCourt(gl.Contract):
             "evidence": {
                 "source": "pyth-solana-receiver:" + FEEDS[d.feed][1],
                 "price": _fmt_price(int(d.price), int(d.expo)) if d.price != "" else "",
-                "price_raw": d.price, "expo": int(d.expo), "conf": d.conf,
+                "price_raw": d.price, "expo": int(d.expo),
                 "publish_time": int(d.publish_time),
+                "precision": f"{PRICE_SIG_DIGITS} significant digits, publish time to the minute",
             },
             "condition_met": d.condition_met, "winner": d.winner,
             "settle_attempts": int(d.settle_attempts), "last_error": d.last_error,
@@ -577,25 +603,24 @@ class PriceCourt(gl.Contract):
         obs = self._observe_price(feed_id, account, d)
         d.settle_attempts = u64(int(d.settle_attempts) + 1)
 
-        if not obs.get("ok"):
+        if obs["kind"] == "unavailable":
             d.last_error = "price unavailable: " + str(obs.get("reason", "unknown"))
             return self._to_dict(d)
-        publish_time = int(obs["publish_time"])
-        if publish_time < settle_at:
+        if obs["kind"] == "too_early":
             d.last_error = "latest Pyth price predates the settlement time; retry shortly"
             return self._to_dict(d)
-        if publish_time > window_end:
+        if obs["kind"] == "too_late":
             d.last_error = "Pyth price is from after the settlement window"
             return self._to_dict(d)
 
-        price, expo = int(obs["price"]), int(obs["expo"])
-        met = _condition_met(price, expo, d.comparator, int(d.threshold_e8))
+        price, expo, publish_time = int(obs["price"]), int(obs["expo"]), int(obs["publish_time"])
+        met = bool(obs["condition_met"])
         side = d.winner_if_true if met else ("counterparty" if d.winner_if_true == "proposer" else "proposer")
         winner = d.proposer if side == "proposer" else d.counterparty
         loser = d.counterparty if side == "proposer" else d.proposer
         pot = 2 * int(d.stake)
 
-        d.price, d.expo, d.conf = str(price), i64(expo), str(obs["conf"])
+        d.price, d.expo, d.conf = str(price), i64(expo), ""
         d.publish_time = u64(publish_time)
         d.condition_met = met
         d.winner = winner
@@ -686,7 +711,9 @@ class PriceCourt(gl.Contract):
             "pyth_receiver_program": PYTH_RECEIVER_PROGRAM,
             "solana_rpcs": list(SOLANA_RPCS),
             "price_window_seconds": int(self.price_window_seconds),
-            "price_tolerance_bps": PRICE_TOLERANCE_BPS,
+            "consensus": "exact match on canonical settlement outcome",
+            "price_sig_digits": PRICE_SIG_DIGITS,
+            "time_bucket_seconds": TIME_BUCKET_SECONDS,
             "deal_count": len(self.deal_order),
             "escrowed": str(int(self.escrowed)),
         }

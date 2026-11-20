@@ -1,5 +1,7 @@
 # PriceCourt
 
+**Live app: https://yoyoblair333-wq.github.io/price-court/** (reads the deployed contract on GenLayer studionet and runs a full live deal in the browser)
+
 **Plain-English price deals between agents: escrowed and adjudicated on GenLayer,
 settled on Pyth evidence, with the verdict written back as on-chain reputation.**
 
@@ -20,7 +22,7 @@ partner, and it ships as a reusable agent skill: [`skills/price-court/SKILL.md`]
 | 3 Contracts & obligations | `propose_deal`: an LLM turns free text into `{feed, settlement time, comparator, threshold, winner_if_true}`. Validators re-parse and must match the leader's canonical JSON exactly. |
 | 4 Payment & escrow | Both stakes are held by the contract and released only by a verdict, a cancel/decline, or a timeout refund. |
 | 5 Evidence (Pyth) | The Pyth price for a whitelisted feed (BTC/USD, ETH/USD, SOL/USD), read from the Pyth Solana Receiver's Wormhole-verified on-chain price account. |
-| 6 Adjudication | Validators agree on the price (within 0.25%) and on the verdict. Payout and reputation (`settled`, `won`, `lost`, `refunded`, amounts) follow deterministically. |
+| 6 Adjudication | Every validator reduces its own Pyth reading to one canonical outcome (window decision, verdict, price to 5 significant digits, publish minute) and must match the leader's exactly. Payout and reputation (`settled`, `won`, `lost`, `refunded`, amounts) follow deterministically. |
 
 ## Architecture
 
@@ -43,7 +45,7 @@ sequenceDiagram
     A->>PC: settle(id) (anyone may call)
     PC->>V: read Pyth price (gl.nondet.web.post getAccountInfo)
     V->>P: each validator fetches and verifies independently
-    V-->>PC: agree on price (within 0.25%), publish time and verdict
+    V-->>PC: identical canonical outcome (verdict, price, minute)
     PC->>PC: evaluate, write the reputation of both addresses
     PC-->>B: pot (emit_transfer, on finalized)
 ```
@@ -73,10 +75,12 @@ stateDiagram-v2
   worded but equivalent replies agree, and any substantive difference disagrees.
 - **The LLM never chooses an id, account or URL.** Feed ids and the Pyth accounts are
   hard-coded in the contract.
-- **The price check uses tolerance plus verdict equality.** Validators read the price
-  independently and must be within 25 bps of the leader with publish times at most
-  120 s apart. They must also derive the *same verdict*, so a price sitting on the
-  threshold cannot be decided by one node alone.
+- **Exact consensus on a canonical outcome (v2).** Each validator reads Pyth itself and
+  reduces the reading to `{kind, condition_met, price (5 significant digits), expo,
+  publish minute}`, where `kind` says whether the reading is inside the settlement window.
+  The leader's outcome is accepted only if it is identical, so the window decision, the
+  verdict, the payout and the stored evidence are the same whichever validator led. A
+  price exactly on a bucket edge or on the threshold fails to agree and the round retries.
 - **The comparison is exact.** `price x 10^expo` is compared with the threshold in integer arithmetic.
 - **It fails closed.** Ambiguous or unsupported terms create no deal. A deal settles
   only with both stakes in. An unreachable, unverified, wrong-feed or pre-T price
@@ -168,7 +172,7 @@ Coverage includes:
 
 - term parsing (equivalent wordings agree, and any differing term disagrees);
 - both settlement outcomes, exact boundaries for every comparator, and proposer-wins-if-true;
-- the price validator: within or beyond tolerance, verdict mismatch, publish-time skew, forged leader price, leader error;
+- the outcome validator: same canonical outcome, price-bucket edge, verdict mismatch, publish-minute mismatch, window-decision mismatch, forged leader outcome, leader error;
 - fail-closed cases: RPC 5xx, unreachable RPC, wrong account owner, wrong feed, partial verification, pre-T price then retry;
 - cancel, decline and refund paths, reputation accumulation, and input guards.
 

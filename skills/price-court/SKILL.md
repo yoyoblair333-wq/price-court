@@ -17,7 +17,7 @@ and both addresses' reputation records are updated.
 | 3 Contracts & obligations | `propose_deal` turns free text into fixed, structured terms (feed, UTC time, comparator, threshold, who wins if true) under validator consensus. The counterparty accepts those exact structured terms. |
 | 4 Payment & escrow | Both stakes are held by the contract; the pot is released only by a verdict or refunded. |
 | 5 Execution / evidence | Pyth price for a whitelisted feed, read by every validator from the Pyth Solana Receiver's verified on-chain price account. |
-| 6 Verification & disputes | Validators must agree on the price (0.25% tolerance) **and** the resulting verdict; the payout and the per-address reputation record (`settled`, `won`, `lost`, `refunded`) follow deterministically. |
+| 6 Verification & disputes | Every validator must reproduce the leader's canonical outcome exactly (window decision, verdict, price to 5 significant digits, publish minute); the payout and the per-address reputation record (`settled`, `won`, `lost`, `refunded`) follow deterministically. |
 
 If the Internet Court entry skill is installed, this deal runs at the **Adjudicated**
 trust level: funds are locked (Guarded) and an independent, consensus verdict decides

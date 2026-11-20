@@ -231,7 +231,9 @@ class TestSettle:
         out = settle(direct_vm, court, deal_id, price=9_612_345_678_901)      # 96,123.45678901
         assert out["status"] == "settled" and out["condition_met"] is True
         assert same(out["winner"], direct_bob)
-        assert out["evidence"]["price"] == "96123.45678901" and out["evidence"]["expo"] == -8
+        # canonical evidence: 5 significant digits, publish time floored to the minute
+        assert out["evidence"]["price"] == "96123" and out["evidence"]["expo"] == 0
+        assert out["evidence"]["publish_time"] == T_EPOCH
         assert out["settle_attempts"] == 1 and out["last_error"] == ""
         assert court.get_config()["escrowed"] == "0"
         assert direct_vm.run_validator() is True
@@ -367,29 +369,41 @@ class TestFailClosed:
 # ------------------------------------------------------------------ price consensus
 
 class TestPriceConsensus:
+    """Validators must reproduce the leader's settlement OUTCOME exactly: window
+    decision, verdict, canonical price and publish minute."""
+
     def _settled(self, vm, court, a, b, price=9_600_000_000_000):
         deal_id = open_deal(vm, court, a, b)
         settle(vm, court, deal_id, price=price)
         vm.clear_mocks()
 
-    def test_small_price_difference_within_tolerance_agrees(self, direct_vm, court, direct_alice, direct_bob):
-        self._settled(direct_vm, court, direct_alice, direct_bob)
-        mock_pyth(direct_vm, price=9_610_000_000_000, publish_time=T_EPOCH + 20)   # +0.10%
+    def test_same_canonical_outcome_agrees(self, direct_vm, court, direct_alice, direct_bob):
+        self._settled(direct_vm, court, direct_alice, direct_bob, price=9_612_345_000_000)
+        mock_pyth(direct_vm, price=9_612_399_999_999, publish_time=T_EPOCH + 40)  # same 5 digits, same minute
         assert direct_vm.run_validator() is True
 
-    def test_price_difference_beyond_tolerance_disagrees(self, direct_vm, court, direct_alice, direct_bob):
-        self._settled(direct_vm, court, direct_alice, direct_bob)
-        mock_pyth(direct_vm, price=9_630_000_000_000, publish_time=T_EPOCH + 20)   # +0.31%
+    def test_tiny_difference_across_price_bucket_disagrees(self, direct_vm, court, direct_alice, direct_bob):
+        # 96123.99 vs 96124.00 gives the same verdict but different stored evidence:
+        # v2 refuses so the stored record is the same whichever validator led
+        self._settled(direct_vm, court, direct_alice, direct_bob, price=9_612_399_000_000)
+        mock_pyth(direct_vm, price=9_612_400_000_000, publish_time=T_EPOCH + 3)
         assert direct_vm.run_validator() is False
 
-    def test_different_verdict_disagrees_even_within_tolerance(self, direct_vm, court, direct_alice, direct_bob):
+    def test_different_verdict_disagrees(self, direct_vm, court, direct_alice, direct_bob):
         self._settled(direct_vm, court, direct_alice, direct_bob, price=9_500_100_000_000)  # just above
-        mock_pyth(direct_vm, price=9_499_900_000_000, publish_time=T_EPOCH + 20)           # just below
+        mock_pyth(direct_vm, price=9_499_900_000_000, publish_time=T_EPOCH + 3)            # just below
         assert direct_vm.run_validator() is False
 
-    def test_publish_time_skew_disagrees(self, direct_vm, court, direct_alice, direct_bob):
+    def test_different_publish_minute_disagrees(self, direct_vm, court, direct_alice, direct_bob):
         self._settled(direct_vm, court, direct_alice, direct_bob)
-        mock_pyth(direct_vm, publish_time=T_EPOCH + 200)
+        mock_pyth(direct_vm, publish_time=T_EPOCH + 61)
+        assert direct_vm.run_validator() is False
+
+    def test_window_decision_must_match(self, direct_vm, court, direct_alice, direct_bob):
+        # leader saw an in-window price; a validator whose latest price predates the
+        # settlement time would leave the deal open, so it must disagree
+        self._settled(direct_vm, court, direct_alice, direct_bob)
+        mock_pyth(direct_vm, publish_time=T_EPOCH - 10)
         assert direct_vm.run_validator() is False
 
     def test_validator_cannot_read_but_leader_did_disagrees(self, direct_vm, court, direct_alice, direct_bob):
@@ -402,10 +416,11 @@ class TestPriceConsensus:
         mock_pyth(direct_vm, publish_time=T_EPOCH + 3)
         assert direct_vm.run_validator(leader_error=Exception("boom")) is False
 
-    def test_validator_rejects_forged_leader_price(self, direct_vm, court, direct_alice, direct_bob):
+    def test_validator_rejects_forged_leader_outcome(self, direct_vm, court, direct_alice, direct_bob):
         self._settled(direct_vm, court, direct_alice, direct_bob)
         mock_pyth(direct_vm, publish_time=T_EPOCH + 3)
-        forged = {"ok": True, "price": "9000000000000", "conf": "1", "expo": -8, "publish_time": T_EPOCH + 3}
+        forged = {"kind": "verdict", "condition_met": False, "price": "90000", "expo": 0,
+                  "publish_time": T_EPOCH}
         assert direct_vm.run_validator(leader_result=forged) is False
 
 

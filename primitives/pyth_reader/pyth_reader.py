@@ -18,12 +18,19 @@ checks, byte by byte:
   * the embedded 32-byte feed id equals the whitelisted id for that feed,
   * the price is positive.
 
-The leader's reading is accepted only if each validator's own reading is within
-`PRICE_TOLERANCE_BPS` of it and the publish times are at most
-`MAX_PUBLISH_SKEW_SECONDS` apart. A leader claiming "unavailable" is accepted only if
-the validator cannot read a usable price either. The agreed price is stored, so any
-other contract or client can read it with a plain view (`latest`, `get_price`) at no
-consensus cost.
+Consensus is on a CANONICAL observation, not on a raw reading. Every node (leader and
+validators alike) reduces its own verified reading to the same deterministic form:
+
+  * price truncated to `price_sig_digits` significant digits (exact integer arithmetic),
+  * publish_time floored to a `time_bucket_seconds` bucket.
+
+A validator accepts only if its own canonical observation is EXACTLY equal to the
+leader's. The stored value is therefore one that every agreeing validator computed
+itself, so every accepted output yields the same downstream decision (for example the
+same side of a threshold) no matter which validator was leader. A reading that sits on a
+bucket edge simply fails to agree and the round is retried with fresh reads: liveness is
+traded for an identical material result. A leader claiming "unavailable" is accepted
+only if the validator cannot read a usable price either.
 
 Stored prices only move forward: a reading whose publish_time is not newer than the
 stored one, or that is older than `max_staleness_seconds` at the transaction's consensus
@@ -47,7 +54,7 @@ from genlayer import *
 # Constants
 # --------------------------------------------------------------------------- #
 
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 
 # Default whitelist. feed -> (Pyth feed id, Solana PriceUpdateV2 account maintained by
 # the Pyth Solana Receiver for that feed, shard 0). The owner may add more feeds.
@@ -69,8 +76,8 @@ SOLANA_RPCS = (
     "https://solana-rpc.publicnode.com",
 )
 
-PRICE_TOLERANCE_BPS = 25        # validator vs leader price: max 0.25% apart
-MAX_PUBLISH_SKEW_SECONDS = 120  # validator vs leader publish_time
+DEFAULT_PRICE_SIG_DIGITS = 5    # canonical precision: 5 significant digits (BTC 74962.34 -> 74962)
+DEFAULT_TIME_BUCKET_SECONDS = 60
 MAX_FEEDS = 64
 BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
@@ -91,10 +98,9 @@ class Feed:
 @allow_storage
 @dataclass
 class PriceRecord:
-    price: str          # raw Pyth integer price ("" until the first good refresh)
-    conf: str           # raw Pyth integer confidence interval
+    price: str          # canonical integer price ("" until the first good refresh)
     expo: i64           # decimal exponent: real price = price * 10^expo
-    publish_time: u64   # unix seconds, Pyth publish time
+    publish_time: u64   # unix seconds, start of the agreed publish-time bucket
     updated_at: str     # consensus datetime of the refresh that stored it
     refreshes: u64      # successful (stored) refreshes
     attempts: u64       # all refresh calls
@@ -174,12 +180,24 @@ def _fmt_price(price: int, expo: int) -> str:
     return "-" + out if neg else out
 
 
-def _within_bps(a_price: int, a_expo: int, b_price: int, b_expo: int, bps: int) -> bool:
-    e = min(a_expo, b_expo)
-    a = a_price * 10 ** (a_expo - e)
-    b = b_price * 10 ** (b_expo - e)
-    big = max(abs(a), abs(b))
-    return abs(a - b) * 10000 <= bps * big
+def canonical_price(price: int, expo: int, sig_digits: int) -> tuple[int, int]:
+    """Truncate a positive Pyth integer price to `sig_digits` significant digits.
+    Exact and deterministic: (9612345000000, -8, 5) -> (96123, 0). Trailing zeros are
+    folded into the exponent so equal values always have one representation."""
+    drop = max(0, len(str(price)) - sig_digits)
+    p, e = price // 10 ** drop, expo + drop
+    while p % 10 == 0:
+        p, e = p // 10, e + 1
+    return p, e
+
+
+def canonicalize(obs: dict, sig_digits: int, bucket: int) -> dict:
+    """Reduce a verified reading to the form validators must match exactly."""
+    if not obs.get("ok"):
+        return {"ok": False, "reason": str(obs.get("reason", "unknown"))}
+    p, e = canonical_price(int(obs["price"]), int(obs["expo"]), sig_digits)
+    pt = int(obs["publish_time"])
+    return {"ok": True, "price": str(p), "expo": e, "publish_time": pt - pt % bucket}
 
 
 def decode_price_update_v2(raw: bytes, feed_id: str) -> dict:
@@ -235,16 +253,18 @@ def read_pyth_account(feed_id: str, account: str) -> dict:
     return {"ok": False, "reason": reason}
 
 
-def _agree(lead: dict, mine: dict) -> bool:
-    """Validator rule: both unavailable, or both ok, within tolerance and skew."""
-    if not lead.get("ok"):
+def _agree(lead, mine: dict) -> bool:
+    """Validator rule: both unavailable, or both ok with an IDENTICAL canonical
+    observation (price, exponent and publish bucket). The unavailable reason is
+    diagnostic only and is not compared."""
+    if not isinstance(lead, dict) or not isinstance(lead.get("ok"), bool):
+        return False
+    if not lead["ok"]:
         return not mine.get("ok")
     if not mine.get("ok"):
         return False
-    if abs(int(lead["publish_time"]) - int(mine["publish_time"])) > MAX_PUBLISH_SKEW_SECONDS:
-        return False
-    return _within_bps(int(lead["price"]), int(lead["expo"]), int(mine["price"]), int(mine["expo"]),
-                       PRICE_TOLERANCE_BPS)
+    keys = ("ok", "price", "expo", "publish_time")
+    return set(lead) == set(keys) and all(lead[k] == mine[k] for k in keys)
 
 
 # --------------------------------------------------------------------------- #
@@ -258,11 +278,21 @@ class PythReader(gl.Contract):
     feed_order: DynArray[str]
     prices: TreeMap[str, PriceRecord]
     max_staleness_seconds: u64
+    price_sig_digits: u64
+    time_bucket_seconds: u64
 
-    def __init__(self, max_staleness_seconds: int = 300, owner: str = ""):
+    def __init__(self, max_staleness_seconds: int = 300, owner: str = "",
+                 price_sig_digits: int = DEFAULT_PRICE_SIG_DIGITS,
+                 time_bucket_seconds: int = DEFAULT_TIME_BUCKET_SECONDS):
         if max_staleness_seconds < 10 or max_staleness_seconds > 7 * 24 * 3600:
             _fail("max_staleness_seconds must be between 10 seconds and 7 days")
+        if price_sig_digits < 3 or price_sig_digits > 12:
+            _fail("price_sig_digits must be between 3 and 12")
+        if time_bucket_seconds < 1 or time_bucket_seconds > 3600 or time_bucket_seconds > max_staleness_seconds:
+            _fail("time_bucket_seconds must be between 1 and 3600 and not above max_staleness_seconds")
         self.max_staleness_seconds = u64(max_staleness_seconds)
+        self.price_sig_digits = u64(price_sig_digits)
+        self.time_bucket_seconds = u64(time_bucket_seconds)
         o = gl.message.sender_address if owner == "" else _addr(owner)
         self.owner = o
         self.pending_owner = o
@@ -275,7 +305,7 @@ class PythReader(gl.Contract):
             if len(self.feed_order) >= MAX_FEEDS:
                 _fail("feed whitelist is full")
             self.feed_order.append(name)
-            self.prices[name] = PriceRecord(price="", conf="", expo=i64(0), publish_time=u64(0),
+            self.prices[name] = PriceRecord(price="", expo=i64(0), publish_time=u64(0),
                                             updated_at="", refreshes=u64(0), attempts=u64(0),
                                             last_error="")
         self.feeds[name] = Feed(feed_id=feed_id, account=account)
@@ -296,21 +326,25 @@ class PythReader(gl.Contract):
             "source": "pyth-solana-receiver:" + f.account,
             "available": has,
             "price": _fmt_price(int(r.price), int(r.expo)) if has else "",
-            "price_raw": r.price, "conf_raw": r.conf,
-            "conf": _fmt_price(int(r.conf), int(r.expo)) if has else "",
+            "price_raw": r.price,
             "expo": int(r.expo), "publish_time": int(r.publish_time),
+            "price_sig_digits": int(self.price_sig_digits),
+            "time_bucket_seconds": int(self.time_bucket_seconds),
             "updated_at": r.updated_at, "refreshes": int(r.refreshes),
             "attempts": int(r.attempts), "last_error": r.last_error,
         }
 
     def _observe(self, feed_id: str, account: str) -> dict:
+        sig, bucket = int(self.price_sig_digits), int(self.time_bucket_seconds)
+
         def leader_fn() -> dict:
-            return read_pyth_account(feed_id, account)
+            return canonicalize(read_pyth_account(feed_id, account), sig, bucket)
 
         def validator_fn(leader_res) -> bool:
             if not isinstance(leader_res, gl.vm.Return):
                 return False
-            return _agree(leader_res.calldata, read_pyth_account(feed_id, account))
+            mine = canonicalize(read_pyth_account(feed_id, account), sig, bucket)
+            return _agree(leader_res.calldata, mine)
 
         return gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
 
@@ -336,9 +370,9 @@ class PythReader(gl.Contract):
             r.last_error = "Pyth price is older than max_staleness_seconds"
             return self._record(name)
         if pt <= int(r.publish_time):
-            r.last_error = "no newer Pyth price than the stored one"
+            r.last_error = "no newer Pyth price bucket than the stored one"
             return self._record(name)
-        r.price, r.conf, r.expo = str(obs["price"]), str(obs["conf"]), i64(int(obs["expo"]))
+        r.price, r.expo = str(obs["price"]), i64(int(obs["expo"]))
         r.publish_time = u64(pt)
         r.updated_at = _now_iso()
         r.refreshes = u64(int(r.refreshes) + 1)
@@ -376,13 +410,14 @@ class PythReader(gl.Contract):
     @gl.public.view
     def get_price(self, feed: str) -> dict:
         """Compact read for consumers. Reverts if no verified price has been stored yet,
-        so a caller can never mistake "no data" for a price."""
+        so a caller can never mistake "no data" for a price. Every field is the canonical
+        consensus value, identical whichever validator led the round that stored it."""
         name, _ = self._feed(feed)
         r = self.prices[name]
         if r.price == "":
             _fail(f"no verified price stored for {name} yet; call refresh first")
         return {"feed": name, "price": _fmt_price(int(r.price), int(r.expo)),
-                "price_raw": r.price, "conf_raw": r.conf, "expo": int(r.expo),
+                "price_raw": r.price, "expo": int(r.expo),
                 "publish_time": int(r.publish_time)}
 
     @gl.public.view
@@ -398,7 +433,8 @@ class PythReader(gl.Contract):
                       for n in self.feed_order},
             "pyth_receiver_program": PYTH_RECEIVER_PROGRAM,
             "solana_rpcs": list(SOLANA_RPCS),
-            "price_tolerance_bps": PRICE_TOLERANCE_BPS,
-            "max_publish_skew_seconds": MAX_PUBLISH_SKEW_SECONDS,
+            "consensus": "exact match on canonical (price, expo, publish bucket)",
+            "price_sig_digits": int(self.price_sig_digits),
+            "time_bucket_seconds": int(self.time_bucket_seconds),
             "max_staleness_seconds": int(self.max_staleness_seconds),
         }
